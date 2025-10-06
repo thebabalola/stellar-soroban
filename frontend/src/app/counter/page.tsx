@@ -36,41 +36,75 @@ export default function CounterPage() {
       if (connected) {
         const pubKey = await getAddress();
         setPublicKey(pubKey.address);
+        // Refresh count when wallet is connected
+        setTimeout(() => refreshCount(), 1000);
       }
     };
 
     checkWallet();
-    getInitialCount();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Refresh count when publicKey changes
+  useEffect(() => {
+    if (publicKey) {
+      refreshCount();
+    }
+  }, [publicKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const getInitialCount = async () => {
     try {
-      const topic1 = xdr.ScVal.scvSymbol("COUNTER").toXDR("base64");
-      const topic2 = xdr.ScVal.scvSymbol("increment").toXDR("base64");
-
-      const latestLedger = await server.getLatestLedger();
-      const events = await server.getEvents({
-        startLedger: latestLedger.sequence - 2000,
-        filters: [
-          {
-            type: "contract",
-            contractIds: [CONTRACT_ID],
-            topics: [[topic1, topic2]],
-          },
-        ],
-        limit: 20,
-      });
-      setCount(events.events.map((e) => e.value.u32()).pop() || null);
+      // Use refreshCount to get the current count directly
+      await refreshCount();
     } catch (error) {
-      console.error(error);
+      console.error("Error getting initial count:", error);
+      // Set to 0 as default if we can't get the count
+      setCount(0);
     }
   };
 
   const refreshCount = async () => {
+    if (!publicKey) {
+      console.log("No public key available for refreshCount");
+      return;
+    }
+    
     try {
-      const account = await server.getAccount(publicKey!);
-      const contract = new Contract(CONTRACT_ID);
+      console.log("Starting refreshCount...");
+      const account = await server.getAccount(publicKey);
+      console.log("Account loaded:", account.accountId());
       
+      const contract = new Contract(CONTRACT_ID);
+      console.log("Contract created with ID:", CONTRACT_ID);
+      
+      // Try to read the contract storage directly
+      console.log("Trying to read contract storage...");
+      const contractData = await server.getContractData(CONTRACT_ID);
+      console.log("Contract data:", contractData);
+      
+      // Look for the count in the contract data
+      if (contractData && contractData.length > 0) {
+        for (const data of contractData) {
+          console.log("Checking data entry:", data);
+          if (data.key && data.key.contractData && data.key.contractData.key) {
+            const key = data.key.contractData.key;
+            console.log("Data key:", key);
+            
+            // Check if this is the count key (instance storage)
+            if (key.switch().name === 'scvSymbol' && key.sym() === 'COUNTER') {
+              console.log("Found COUNTER key!");
+              if (data.val && data.val.switch().name === 'scvU32') {
+                const count = data.val.u32();
+                console.log("✅ Found count in storage:", count);
+                setCount(count);
+                return;
+              }
+            }
+          }
+        }
+      }
+      
+      // If storage reading doesn't work, try the simulation approach
+      console.log("Storage reading failed, trying simulation...");
       const tx = new TransactionBuilder(account, {
         fee: BASE_FEE,
         networkPassphrase: NETWORK_PASSPHRASE,
@@ -79,19 +113,33 @@ export default function CounterPage() {
         .setTimeout(30)
         .build();
 
+      console.log("Transaction built, preparing...");
       const preparedTx = await server.prepareTransaction(tx);
-      const result = await server.simulateTransaction(preparedTx);
+      console.log("Transaction prepared, simulating...");
       
-      if (result.results && result.results.length > 0) {
-        const returnValue = result.results[0].xdr;
-        if (returnValue) {
-          const scVal = xdr.ScVal.fromXDR(returnValue, "base64");
-          const count = scVal.u32();
-          setCount(count);
+      const result = await server.simulateTransaction(preparedTx);
+      console.log("Simulation completed, result:", result);
+      
+      // Check if there are any events that might contain the count
+      if (result.events && result.events.length > 0) {
+        console.log("Found events:", result.events);
+        for (const event of result.events) {
+          console.log("Event:", event);
+          if (event.value && event.value.switch().name === 'scvU32') {
+            const count = event.value.u32();
+            console.log("✅ Found count in event:", count);
+            setCount(count);
+            return;
+          }
         }
       }
+      
+      console.log("❌ No count found in storage or events, setting to 0");
+      setCount(0);
+      
     } catch (error) {
-      console.error("Error refreshing count:", error);
+      console.error("❌ Error in refreshCount:", error);
+      setCount(0);
     }
   };
 
@@ -357,9 +405,18 @@ export default function CounterPage() {
       {publicKey ? (
         <div>
           <p className="mb-4">Connected: {publicKey}</p>
-          <p className="mb-4">
-            Current Count: {count === null ? "Unknown" : count}
-          </p>
+          <div className="mb-4 flex items-center gap-4">
+            <p>
+              Current Count: {count === null ? "Loading..." : count}
+            </p>
+            <button
+              onClick={refreshCount}
+              disabled={loading}
+              className="bg-gray-500 hover:bg-gray-700 text-white font-bold py-1 px-3 rounded text-sm disabled:opacity-50"
+            >
+              Refresh
+            </button>
+          </div>
           <div className="space-x-2">
             <button
               onClick={handleIncrement}
