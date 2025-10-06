@@ -53,7 +53,34 @@ export default function CounterPage() {
 
   const getInitialCount = async () => {
     try {
-      // Use refreshCount to get the current count directly
+      // Try to read from events first
+      const topic1 = xdr.ScVal.scvSymbol("count").toXDR("base64");
+      const topic2 = xdr.ScVal.scvSymbol("increment").toXDR("base64");
+
+      const latestLedger = await server.getLatestLedger();
+      const events = await server.getEvents({
+        startLedger: latestLedger.sequence - 2000,
+        filters: [
+          {
+            type: "contract",
+            contractIds: [CONTRACT_ID],
+            topics: [[topic1, topic2]],
+          },
+        ],
+        limit: 20,
+      });
+      
+      if (events.events && events.events.length > 0) {
+        const latestEvent = events.events[events.events.length - 1];
+        if (latestEvent.value && latestEvent.value.switch().name === 'scvU32') {
+          const count = latestEvent.value.u32();
+          console.log("✅ Found count from events:", count);
+          setCount(count);
+          return;
+        }
+      }
+      
+      // If events don't work, use refreshCount
       await refreshCount();
     } catch (error) {
       console.error("Error getting initial count:", error);
@@ -76,35 +103,7 @@ export default function CounterPage() {
       const contract = new Contract(CONTRACT_ID);
       console.log("Contract created with ID:", CONTRACT_ID);
       
-      // Try to read the contract storage directly
-      console.log("Trying to read contract storage...");
-      const contractData = await server.getContractData(CONTRACT_ID);
-      console.log("Contract data:", contractData);
-      
-      // Look for the count in the contract data
-      if (contractData && contractData.length > 0) {
-        for (const data of contractData) {
-          console.log("Checking data entry:", data);
-          if (data.key && data.key.contractData && data.key.contractData.key) {
-            const key = data.key.contractData.key;
-            console.log("Data key:", key);
-            
-            // Check if this is the count key (instance storage)
-            if (key.switch().name === 'scvSymbol' && key.sym() === 'COUNTER') {
-              console.log("Found COUNTER key!");
-              if (data.val && data.val.switch().name === 'scvU32') {
-                const count = data.val.u32();
-                console.log("✅ Found count in storage:", count);
-                setCount(count);
-                return;
-              }
-            }
-          }
-        }
-      }
-      
-      // If storage reading doesn't work, try the simulation approach
-      console.log("Storage reading failed, trying simulation...");
+      // Create a simple transaction to call get_count
       const tx = new TransactionBuilder(account, {
         fee: BASE_FEE,
         networkPassphrase: NETWORK_PASSPHRASE,
@@ -119,22 +118,105 @@ export default function CounterPage() {
       
       const result = await server.simulateTransaction(preparedTx);
       console.log("Simulation completed, result:", result);
+      console.log("Result keys:", Object.keys(result));
+      console.log("Result results:", result.results);
+      console.log("Result events:", result.events);
+      
+      // Check the simulation results
+      if (result.results && result.results.length > 0) {
+        const operationResult = result.results[0];
+        console.log("Operation result:", operationResult);
+        console.log("Operation result keys:", Object.keys(operationResult));
+        
+        if (operationResult.xdr) {
+          console.log("XDR data found:", operationResult.xdr);
+          
+          try {
+            const scVal = xdr.ScVal.fromXDR(operationResult.xdr, "base64");
+            console.log("ScVal parsed successfully:", scVal);
+            console.log("ScVal switch:", scVal.switch().name);
+            
+            let count = 0;
+            if (scVal.switch().name === 'scvU32') {
+              count = scVal.u32();
+              console.log("✅ Extracted u32 count:", count);
+            } else if (scVal.switch().name === 'scvI32') {
+              count = scVal.i32();
+              console.log("✅ Extracted i32 count:", count);
+            } else {
+              console.log("Unexpected ScVal type:", scVal.switch().name);
+              console.log("ScVal value:", scVal.value());
+              count = scVal.value() || 0;
+            }
+            
+            setCount(count);
+            console.log("✅ Count set to:", count);
+            return;
+          } catch (parseError) {
+            console.error("❌ Error parsing ScVal:", parseError);
+            console.log("Raw XDR:", operationResult.xdr);
+          }
+        } else {
+          console.log("No XDR data in operation result");
+        }
+      } else {
+        console.log("No results array in simulation");
+      }
       
       // Check if there are any events that might contain the count
       if (result.events && result.events.length > 0) {
-        console.log("Found events:", result.events);
-        for (const event of result.events) {
-          console.log("Event:", event);
-          if (event.value && event.value.switch().name === 'scvU32') {
-            const count = event.value.u32();
-            console.log("✅ Found count in event:", count);
-            setCount(count);
-            return;
+        console.log("Found events in simulation:", result.events.length);
+        for (let i = 0; i < result.events.length; i++) {
+          const event = result.events[i];
+          console.log(`Event ${i}:`, event);
+          console.log(`Event ${i} keys:`, Object.keys(event));
+          
+          if (event.value) {
+            console.log(`Event ${i} value:`, event.value);
+            console.log(`Event ${i} value switch:`, event.value.switch().name);
+            
+            if (event.value.switch().name === 'scvU32') {
+              const count = event.value.u32();
+              console.log("✅ Found count in simulation event:", count);
+              setCount(count);
+              return;
+            }
           }
         }
       }
       
-      console.log("❌ No count found in storage or events, setting to 0");
+      // If simulation doesn't work, try reading from events
+      console.log("Simulation failed, trying events...");
+      const topic1 = xdr.ScVal.scvSymbol("count").toXDR("base64");
+      const topic2 = xdr.ScVal.scvSymbol("increment").toXDR("base64");
+
+      const latestLedger = await server.getLatestLedger();
+      const events = await server.getEvents({
+        startLedger: latestLedger.sequence - 100,
+        filters: [
+          {
+            type: "contract",
+            contractIds: [CONTRACT_ID],
+            topics: [[topic1, topic2]],
+          },
+        ],
+        limit: 10,
+      });
+      
+      if (events.events && events.events.length > 0) {
+        console.log("Found events:", events.events.length);
+        const latestEvent = events.events[events.events.length - 1];
+        console.log("Latest event:", latestEvent);
+        
+        if (latestEvent.value && latestEvent.value.switch().name === 'scvU32') {
+          const count = latestEvent.value.u32();
+          console.log("✅ Found count from events:", count);
+          setCount(count);
+          return;
+        }
+      }
+      
+      console.log("❌ No count found, setting to 0");
       setCount(0);
       
     } catch (error) {
