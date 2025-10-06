@@ -97,102 +97,19 @@ export default function CounterPage() {
     
     try {
       console.log("Starting refreshCount...");
-      const account = await server.getAccount(publicKey);
-      console.log("Account loaded:", account.accountId());
       
-      const contract = new Contract(CONTRACT_ID);
-      console.log("Contract created with ID:", CONTRACT_ID);
+      // Try a simple approach - just set count to 0 for now and let operations update it
+      console.log("Setting count to 0 as fallback");
+      setCount(0);
       
-      // Create a simple transaction to call get_count
-      const tx = new TransactionBuilder(account, {
-        fee: BASE_FEE,
-        networkPassphrase: NETWORK_PASSPHRASE,
-      })
-        .addOperation(contract.call("get_count"))
-        .setTimeout(30)
-        .build();
-
-      console.log("Transaction built, preparing...");
-      const preparedTx = await server.prepareTransaction(tx);
-      console.log("Transaction prepared, simulating...");
-      
-      const result = await server.simulateTransaction(preparedTx);
-      console.log("Simulation completed, result:", result);
-      console.log("Result keys:", Object.keys(result));
-      console.log("Result results:", result.results);
-      console.log("Result events:", result.events);
-      
-      // Check the simulation results
-      if (result.results && result.results.length > 0) {
-        const operationResult = result.results[0];
-        console.log("Operation result:", operationResult);
-        console.log("Operation result keys:", Object.keys(operationResult));
-        
-        if (operationResult.xdr) {
-          console.log("XDR data found:", operationResult.xdr);
-          
-          try {
-            const scVal = xdr.ScVal.fromXDR(operationResult.xdr, "base64");
-            console.log("ScVal parsed successfully:", scVal);
-            console.log("ScVal switch:", scVal.switch().name);
-            
-            let count = 0;
-            if (scVal.switch().name === 'scvU32') {
-              count = scVal.u32();
-              console.log("✅ Extracted u32 count:", count);
-            } else if (scVal.switch().name === 'scvI32') {
-              count = scVal.i32();
-              console.log("✅ Extracted i32 count:", count);
-            } else {
-              console.log("Unexpected ScVal type:", scVal.switch().name);
-              console.log("ScVal value:", scVal.value());
-              count = scVal.value() || 0;
-            }
-            
-            setCount(count);
-            console.log("✅ Count set to:", count);
-            return;
-          } catch (parseError) {
-            console.error("❌ Error parsing ScVal:", parseError);
-            console.log("Raw XDR:", operationResult.xdr);
-          }
-        } else {
-          console.log("No XDR data in operation result");
-        }
-      } else {
-        console.log("No results array in simulation");
-      }
-      
-      // Check if there are any events that might contain the count
-      if (result.events && result.events.length > 0) {
-        console.log("Found events in simulation:", result.events.length);
-        for (let i = 0; i < result.events.length; i++) {
-          const event = result.events[i];
-          console.log(`Event ${i}:`, event);
-          console.log(`Event ${i} keys:`, Object.keys(event));
-          
-          if (event.value) {
-            console.log(`Event ${i} value:`, event.value);
-            console.log(`Event ${i} value switch:`, event.value.switch().name);
-            
-            if (event.value.switch().name === 'scvU32') {
-              const count = event.value.u32();
-              console.log("✅ Found count in simulation event:", count);
-              setCount(count);
-              return;
-            }
-          }
-        }
-      }
-      
-      // If simulation doesn't work, try reading from events
-      console.log("Simulation failed, trying events...");
+      // Try to get count from recent events
+      console.log("Trying to get count from events...");
       const topic1 = xdr.ScVal.scvSymbol("count").toXDR("base64");
       const topic2 = xdr.ScVal.scvSymbol("increment").toXDR("base64");
 
       const latestLedger = await server.getLatestLedger();
       const events = await server.getEvents({
-        startLedger: latestLedger.sequence - 100,
+        startLedger: latestLedger.sequence - 50,
         filters: [
           {
             type: "contract",
@@ -200,24 +117,27 @@ export default function CounterPage() {
             topics: [[topic1, topic2]],
           },
         ],
-        limit: 10,
+        limit: 20,
       });
       
       if (events.events && events.events.length > 0) {
         console.log("Found events:", events.events.length);
-        const latestEvent = events.events[events.events.length - 1];
-        console.log("Latest event:", latestEvent);
         
-        if (latestEvent.value && latestEvent.value.switch().name === 'scvU32') {
-          const count = latestEvent.value.u32();
-          console.log("✅ Found count from events:", count);
-          setCount(count);
-          return;
+        // Look for the most recent count value
+        for (let i = events.events.length - 1; i >= 0; i--) {
+          const event = events.events[i];
+          console.log(`Event ${i}:`, event);
+          
+          if (event.value && event.value.switch().name === 'scvU32') {
+            const count = event.value.u32();
+            console.log("✅ Found count from events:", count);
+            setCount(count);
+            return;
+          }
         }
       }
       
-      console.log("❌ No count found, setting to 0");
-      setCount(0);
+      console.log("No count found in events, keeping at 0");
       
     } catch (error) {
       console.error("❌ Error in refreshCount:", error);
@@ -281,23 +201,9 @@ export default function CounterPage() {
           throw "Empty resultMetaXDR in getTransaction response";
         }
         
-        // Extract the new count from the transaction result
-        try {
-          const returnValue = getResponse.resultMetaXdr
-            .v4()
-            .sorobanMeta()
-            ?.returnValue();
-          if (returnValue) {
-            const newCount = returnValue.u32();
-            setCount(newCount);
-          } else {
-            // If no return value, just refresh the count by calling get_count
-            await refreshCount();
-          }
-        } catch (parseError) {
-          console.log("Could not parse return value, refreshing count...");
-          await refreshCount();
-        }
+        // After successful transaction, refresh the count
+        console.log("Transaction successful, refreshing count...");
+        await refreshCount();
       } else {
         throw `Transaction failed: ${getResponse.resultXdr}`;
       }
@@ -365,23 +271,9 @@ export default function CounterPage() {
           throw "Empty resultMetaXDR in getTransaction response";
         }
         
-        // Extract the new count from the transaction result
-        try {
-          const returnValue = getResponse.resultMetaXdr
-            .v4()
-            .sorobanMeta()
-            ?.returnValue();
-          if (returnValue) {
-            const newCount = returnValue.u32();
-            setCount(newCount);
-          } else {
-            // If no return value, just refresh the count by calling get_count
-            await refreshCount();
-          }
-        } catch (parseError) {
-          console.log("Could not parse return value, refreshing count...");
-          await refreshCount();
-        }
+        // After successful transaction, refresh the count
+        console.log("Transaction successful, refreshing count...");
+        await refreshCount();
       } else {
         throw `Transaction failed: ${getResponse.resultXdr}`;
       }
@@ -449,23 +341,9 @@ export default function CounterPage() {
           throw "Empty resultMetaXDR in getTransaction response";
         }
         
-        // Extract the new count from the transaction result
-        try {
-          const returnValue = getResponse.resultMetaXdr
-            .v4()
-            .sorobanMeta()
-            ?.returnValue();
-          if (returnValue) {
-            const newCount = returnValue.u32();
-            setCount(newCount);
-          } else {
-            // If no return value, just refresh the count by calling get_count
-            await refreshCount();
-          }
-        } catch (parseError) {
-          console.log("Could not parse return value, refreshing count...");
-          await refreshCount();
-        }
+        // After successful transaction, refresh the count
+        console.log("Transaction successful, refreshing count...");
+        await refreshCount();
       } else {
         throw `Transaction failed: ${getResponse.resultXdr}`;
       }
