@@ -27,7 +27,7 @@ This repository uses the recommended structure for a Soroban project:
 ## Deployment Information
 
 ### Contract Details
-- **Contract ID**: `CBOZO7BFB2YM4AFEYJYPLRMWKOR5NXP2UK7CMP72D7KJQ6TGL27S2TJA`
+- **Contract ID**: `CDERPHCPZQJL3VFU6PSLEGJD67RJNOLWADIBVET62A2GHLHZDZPSAWSS`
 - **Network**: Stellar Testnet
 - **WASM Hash**: `c0b4830c97c2a33878d988d7cf971819c45d4c190fb8eeece802449fd986e34b`
 - **RPC URL**: `https://soroban-testnet.stellar.org:443`
