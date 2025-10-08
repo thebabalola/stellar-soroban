@@ -17,6 +17,7 @@ import {
 } from "@stellar/freighter-api";
 
 import { ConnectButton } from "../../components/ConnectWalletButton";
+import { Client, networks } from "../../contracts/counter/src/index"; // For reading count
 
 // Replace with your actual contract ID and network details
 const CONTRACT_ID = "CBOZO7BFB2YM4AFEYJYPLRMWKOR5NXP2UK7CMP72D7KJQ6TGL27S2TJA";
@@ -29,6 +30,15 @@ export default function CounterPage() {
   const [loading, setLoading] = useState(false);
 
   const server = new StellarRpc.Server(SOROBAN_URL);
+
+  // Create contract client function for reading count using TypeScript bindings
+  const getContractClient = () => {
+    return new Client({
+      ...networks.testnet,
+      rpcUrl: "https://soroban-testnet.stellar.org:443",
+      // No signTransaction needed for read operations
+    });
+  };
 
   useEffect(() => {
     const checkWallet = async () => {
@@ -51,44 +61,6 @@ export default function CounterPage() {
     }
   }, [publicKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const getInitialCount = async () => {
-    try {
-      // Try to read from events first
-      const topic1 = xdr.ScVal.scvSymbol("count").toXDR("base64");
-      const topic2 = xdr.ScVal.scvSymbol("increment").toXDR("base64");
-
-      const latestLedger = await server.getLatestLedger();
-      const events = await server.getEvents({
-        startLedger: latestLedger.sequence - 2000,
-        filters: [
-          {
-            type: "contract",
-            contractIds: [CONTRACT_ID],
-            topics: [[topic1, topic2]],
-          },
-        ],
-        limit: 20,
-      });
-      
-      if (events.events && events.events.length > 0) {
-        const latestEvent = events.events[events.events.length - 1];
-        if (latestEvent.value && latestEvent.value.switch().name === 'scvU32') {
-          const count = latestEvent.value.u32();
-          console.log("✅ Found count from events:", count);
-          setCount(count);
-          return;
-        }
-      }
-      
-      // If events don't work, use refreshCount
-      await refreshCount();
-    } catch (error) {
-      console.error("Error getting initial count:", error);
-      // Set to 0 as default if we can't get the count
-      setCount(0);
-    }
-  };
-
   const refreshCount = async () => {
     if (!publicKey) {
       console.log("No public key available for refreshCount");
@@ -96,48 +68,24 @@ export default function CounterPage() {
     }
     
     try {
-      console.log("Starting refreshCount...");
+      console.log("Getting count using TypeScript bindings...");
       
-      // Try a simple approach - just set count to 0 for now and let operations update it
-      console.log("Setting count to 0 as fallback");
-      setCount(0);
-      
-      // Try to get count from recent events
-      console.log("Trying to get count from events...");
-      const topic1 = xdr.ScVal.scvSymbol("count").toXDR("base64");
-      const topic2 = xdr.ScVal.scvSymbol("increment").toXDR("base64");
-
-      const latestLedger = await server.getLatestLedger();
-      const events = await server.getEvents({
-        startLedger: latestLedger.sequence - 50,
-        filters: [
-          {
-            type: "contract",
-            contractIds: [CONTRACT_ID],
-            topics: [[topic1, topic2]],
-          },
-        ],
-        limit: 20,
+      // Use the TypeScript bindings to get the count (read-only, no signing needed)
+      const contract = getContractClient();
+      const result = await contract.get_count({
+        simulate: true,
       });
       
-      if (events.events && events.events.length > 0) {
-        console.log("Found events:", events.events.length);
-        
-        // Look for the most recent count value
-        for (let i = events.events.length - 1; i >= 0; i--) {
-          const event = events.events[i];
-          console.log(`Event ${i}:`, event);
-          
-          if (event.value && event.value.switch().name === 'scvU32') {
-            const count = event.value.u32();
-            console.log("✅ Found count from events:", count);
-            setCount(count);
-            return;
-          }
-        }
-      }
+      console.log("Get count result:", result);
       
-      console.log("No count found in events, keeping at 0");
+      if (result.result) {
+        const count = result.result;
+        console.log("✅ Count retrieved:", count);
+        setCount(count);
+      } else {
+        console.log("No result from get_count, setting to 0");
+        setCount(0);
+      }
       
     } catch (error) {
       console.error("❌ Error in refreshCount:", error);
@@ -154,8 +102,10 @@ export default function CounterPage() {
     setLoading(true);
 
     try {
+      console.log("Incrementing counter using direct Stellar SDK...");
+      
+      // Use direct Stellar SDK for transactions (this works reliably)
       const account = await server.getAccount(publicKey);
-
       const contract = new Contract(CONTRACT_ID);
 
       const tx = new TransactionBuilder(account, {
@@ -226,8 +176,10 @@ export default function CounterPage() {
     setLoading(true);
 
     try {
+      console.log("Decrementing counter using direct Stellar SDK...");
+      
+      // Use direct Stellar SDK for transactions
       const account = await server.getAccount(publicKey);
-
       const contract = new Contract(CONTRACT_ID);
 
       const tx = new TransactionBuilder(account, {
@@ -296,8 +248,10 @@ export default function CounterPage() {
     setLoading(true);
 
     try {
+      console.log("Resetting counter using direct Stellar SDK...");
+      
+      // Use direct Stellar SDK for transactions
       const account = await server.getAccount(publicKey);
-
       const contract = new Contract(CONTRACT_ID);
 
       const tx = new TransactionBuilder(account, {
@@ -357,6 +311,11 @@ export default function CounterPage() {
     }
   };
 
+  const handleDisconnect = () => {
+    setPublicKey(null);
+    setCount(null);
+  };
+
   return (
     <div className="max-w-md mx-auto mt-10 text-black">
       <h1 className="text-2xl font-bold mb-4">
@@ -364,7 +323,18 @@ export default function CounterPage() {
       </h1>
       {publicKey ? (
         <div>
-          <p className="mb-4">Connected: {publicKey}</p>
+          <div className="flex justify-between items-center mb-4">
+            <div>
+              <p className="text-sm text-gray-600">Connected:</p>
+              <p className="font-mono text-sm break-all">{publicKey}</p>
+            </div>
+            <button
+              onClick={handleDisconnect}
+              className="bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-3 rounded text-sm"
+            >
+              Disconnect
+            </button>
+          </div>
           <div className="mb-4 flex items-center gap-4">
             <p>
               Current Count: {count === null ? "Loading..." : count}
