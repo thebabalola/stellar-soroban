@@ -20,7 +20,7 @@ import { ConnectButton } from "../../components/ConnectWalletButton";
 import { Client, networks } from "../../contracts/counter/src/index"; // For reading count
 
 // Replace with your actual contract ID and network details
-const CONTRACT_ID = "CBOZO7BFB2YM4AFEYJYPLRMWKOR5NXP2UK7CMP72D7KJQ6TGL27S2TJA";
+const CONTRACT_ID = "CDERPHCPZQJL3VFU6PSLEGJD67RJNOLWADIBVET62A2GHLHZDZPSAWSS";
 const NETWORK_PASSPHRASE = Networks.TESTNET;
 const SOROBAN_URL = "https://soroban-testnet.stellar.org:443";
 

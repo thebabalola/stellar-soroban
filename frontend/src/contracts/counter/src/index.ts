@@ -34,7 +34,7 @@ if (typeof window !== 'undefined') {
 export const networks = {
   testnet: {
     networkPassphrase: "Test SDF Network ; September 2015",
-    contractId: "CBOZO7BFB2YM4AFEYJYPLRMWKOR5NXP2UK7CMP72D7KJQ6TGL27S2TJA",
+    contractId: "CDERPHCPZQJL3VFU6PSLEGJD67RJNOLWADIBVET62A2GHLHZDZPSAWSS",
   }
 } as const
 
@@ -138,7 +138,6 @@ export class Client extends ContractClient {
   }
   constructor(public readonly options: ContractClientOptions) {
     super(
-      // Stellar Counter Contract ABI - XDR-encoded contract specification
       new ContractSpec([ "AAAAAAAAAAAAAAAFcmVzZXQAAAAAAAAAAAAAAA==",
         "AAAAAAAAAAAAAAAJZGVjcmVtZW50AAAAAAAAAAAAAAA=",
         "AAAAAAAAAAAAAAAJZ2V0X2NvdW50AAAAAAAAAAAAAAEAAAAE",
